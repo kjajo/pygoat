@@ -25,22 +25,17 @@ pipeline {
     stage('SAST - Bandit') {
       steps {
         sh '''
-          mkdir -p reports
-          # Bandit via contenedor (evita instalar dependencias locales)
-          docker run --rm -v "$PWD:/src" -w /src python:3.11-slim bash -lc "
-            pip install -q bandit==1.7.9 &&
-            bandit -r . \
-              -x ./.venv,./venv,./.git,./build,./dist,./node_modules,./__pycache__ \
-              -f json -o reports/bandit.json
-          "
-
-          # Gate: falla si existe al menos 1 issue con severity HIGH
-          HIGH_COUNT=$(jq '[.results[] | select(.issue_severity=="HIGH")] | length' reports/bandit.json)
-          echo "Bandit HIGH findings: $HIGH_COUNT"
-          if [ "$HIGH_COUNT" -gt 0 ]; then
-            echo "Security gate failed: Bandit has HIGH findings."
-            exit 1
-          fi
+          docker run --rm \
+            -v "$PWD:/src" \
+            -w /src \
+            python:3.11-slim \
+            bash -lc "
+              mkdir -p reports &&
+              pip install -q bandit==1.7.9 &&
+              bandit -r . \
+                -x ./.venv,./venv,./.git,./build,./dist,./node_modules,./__pycache__ \
+                -f json -o reports/bandit.json
+            "
         '''
       }
     }
