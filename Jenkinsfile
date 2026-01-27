@@ -4,7 +4,7 @@ pipeline {
   environment {
     // URLs internas desde el contenedor Jenkins (misma red docker compose)
     DTRACK_API = "http://dtrack-apiserver:8080/api/v1"
-    DOJO_API   = "http://dojo:8080/api/v2"
+    DOJO_API   = "http://dojo:8081/api/v2"
 
     // Nombre/version del proyecto en DTrack (ajusta a gusto)
     PROJECT_NAME = "pygoat"
@@ -12,7 +12,7 @@ pipeline {
   }
 
   options {
-    timestamps()
+    // timestamps()
   }
 
   stages {
@@ -122,20 +122,12 @@ pipeline {
       }
     }
 
-    stage('Push results to DefectDojo') {
+    stage('Import to DefectDojo') {
       steps {
-        withCredentials([
-          string(credentialsId: 'DEFECTDOJO_API_KEY', variable: 'DOJO_KEY')
-        ]) {
+        withCredentials([string(credentialsId: 'DEFECTDOJO_API_KEY', variable: 'DOJO_KEY')]) {
           sh '''
-            # NOTA: necesitás tener creado en DefectDojo:
-            # - Product
-            # - Engagement (o lo creás por API)
-            # Para ir rápido: crealo manual una vez (Product: pygoat, Engagement: pipeline)
-            #
-            # Luego ponés acá el ENGAGEMENT_ID.
-            #
-            # Tip: si querés automatizar la creación por API, lo hacemos en el siguiente paso.
+            mkdir -p reports_ci
+
             ENGAGEMENT_ID=1
 
             # Bandit
@@ -143,7 +135,7 @@ pipeline {
               -H "Authorization: Token $DOJO_KEY" \
               -F "engagement=$ENGAGEMENT_ID" \
               -F "scan_type=Bandit Scan" \
-              -F "file=@reports/bandit.json" \
+              -F "file=@reports_ci/bandit.json" \
               -F "active=true" -F "verified=false" || true
 
             # Gitleaks
@@ -151,17 +143,15 @@ pipeline {
               -H "Authorization: Token $DOJO_KEY" \
               -F "engagement=$ENGAGEMENT_ID" \
               -F "scan_type=Gitleaks Scan" \
-              -F "file=@reports/gitleaks.json" \
+              -F "file=@reports_ci/gitleaks.json" \
               -F "active=true" -F "verified=false" || true
 
-            # Dependency-Track (opciones)
-            # Algunas instalaciones soportan import directo desde SBOM o "Dependency Track Findings Import".
-            # Empezamos subiendo el SBOM como evidencia:
+            # CycloneDX SBOM (SCA evidencia)
             curl -sS -X POST "$DOJO_API/import-scan/" \
               -H "Authorization: Token $DOJO_KEY" \
               -F "engagement=$ENGAGEMENT_ID" \
               -F "scan_type=CycloneDX Scan" \
-              -F "file=@reports/bom.xml" \
+              -F "file=@reports_ci/bom.xml" \
               -F "active=true" -F "verified=false" || true
           '''
         }
