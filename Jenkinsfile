@@ -191,6 +191,7 @@ pipeline {
               -F "scan_type=Bandit Scan" \
               -F "file=@reports/bandit.json" \
               -F "active=true" -F "verified=false" \
+              -F "environment=Development" \
               -o reports/dojo_import_bandit_response.txt || true
 
             # Gitleaks
@@ -200,6 +201,7 @@ pipeline {
               -F "scan_type=Gitleaks Scan" \
               -F "file=@reports/gitleaks.json" \
               -F "active=true" -F "verified=false" \
+              -F "environment=Development" \
               -o reports/dojo_import_gitleaks_response.txt || true
 
             # CycloneDX
@@ -209,6 +211,7 @@ pipeline {
               -F "scan_type=CycloneDX Scan" \
               -F "file=@reports/bom.xml" \
               -F "active=true" -F "verified=false" \
+              -F "environment=Development" \
               -o reports/dojo_import_cyclonedx_response.txt || true
 
           '''
