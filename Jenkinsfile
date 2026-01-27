@@ -23,7 +23,6 @@ pipeline {
         sh '''
           rm -rf reports
           mkdir -p reports
-          chmod -R a+rwx reports
         '''
       }
     }
@@ -32,7 +31,6 @@ pipeline {
       steps {
         sh '''
           mkdir -p reports
-          chmod -R a+rwx reports
 
           docker run --rm \
             --volumes-from jenkins \
@@ -56,7 +54,6 @@ pipeline {
       steps {
         sh '''
           mkdir -p reports
-          chmod -R a+rwx reports
 
           docker run --rm \
             --volumes-from jenkins \
@@ -76,7 +73,6 @@ pipeline {
       steps {
         sh '''
           mkdir -p reports
-          chmod -R a+rwx reports
 
           docker run --rm \
             --volumes-from jenkins \
