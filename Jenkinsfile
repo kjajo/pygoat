@@ -12,13 +12,6 @@ pipeline {
   }
 
   stages {
-    stage('Preparacion') {
-        steps {
-            // Elimina archivos antes de descargar el código o generar nuevos archivos
-            cleanWs()
-            echo "Workspace limpio y listo."
-        }
-    }
 
     stage('Checkout') {
       steps { checkout scm }
