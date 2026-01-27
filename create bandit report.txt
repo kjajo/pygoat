@@ -1,0 +1,3 @@
+bandit -r . \
+  -x ".venv,venv,.git,build,dist,node_modules,__pycache__,site-packages" \
+  -f txt -o reports/bandit_after.txt
