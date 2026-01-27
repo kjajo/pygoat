@@ -79,9 +79,10 @@ pipeline {
             -w "$WORKDIR" \
             python:3.11-slim \
             bash -lc "
-              pip install -q cyclonedx-bom &&
-              mkdir -p reports &&
+              set -e
+              pip install -q cyclonedx-bom
               pip install -q -r requirements.txt
+              mkdir -p reports
               cyclonedx-py environment -o reports/bom.xml
             "
 
