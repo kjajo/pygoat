@@ -11,9 +11,9 @@ pipeline {
     PROJECT_VERSION = "local"
   }
 
-  options {
+  // options {
     // timestamps()
-  }
+  // }
 
   stages {
     stage('Checkout') {
