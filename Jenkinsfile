@@ -79,6 +79,8 @@ pipeline {
             -w "$WORKDIR" \
             python:3.11-slim \
             bash -lc "
+              sudo apt update
+              sudo apt install -y libpq-dev gcc python3-dev build-essential pkg-config libffi-dev libjpeg-dev zlib1g-dev
               set -e
               pip install -q cyclonedx-bom
               pip install -q -r requirements.txt
