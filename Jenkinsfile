@@ -81,11 +81,8 @@ pipeline {
             bash -lc "
               pip install -q cyclonedx-bom &&
               mkdir -p reports &&
-              if [ -f requirements.txt ]; then
-                cyclonedx-py requirements -i requirements.txt -o reports/bom.xml
-              else
-                cyclonedx-py environment -o reports/bom.xml
-              fi
+              pip install -q -r requirements.txt
+              cyclonedx-py environment -o reports/bom.xml
             "
 
           ls -lah reports
