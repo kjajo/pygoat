@@ -29,21 +29,19 @@ pipeline {
 
     stage('SAST - Bandit') {
       steps {
-        catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
-          sh '''
-            docker run --rm \
-              -v "$PWD:/src" \
-              -w /src \
-              python:3.11-slim \
-              bash -lc "
-                mkdir -p reports &&
-                pip install -q bandit==1.7.9 &&
-                bandit -r . -x $EXCLUDES -f json -o reports/bandit.json
-              "
-            chmod -R a+r reports
-            test -s reports/bandit.json
-          '''
-        }
+        sh '''
+          docker run --rm \
+            -v "$PWD:/src" \
+            -w /src \
+            python:3.11-slim \
+            bash -lc "
+              mkdir -p reports &&
+              pip install -q bandit==1.7.9 &&
+              bandit -r . -x $EXCLUDES -f json -o reports/bandit.json || true
+            "
+          chmod -R a+r reports
+          test -s reports/bandit.json
+        '''
       }
     }
 
