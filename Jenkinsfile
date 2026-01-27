@@ -9,6 +9,7 @@ pipeline {
     PROJECT_VERSION = "local"
 
     EXCLUDES = ".venv,venv,.git,build,dist,node_modules,__pycache__,site-packages"
+    WORKDIR = "/var/jenkins_home/workspace/${JOB_NAME}"
   }
 
   stages {
@@ -30,68 +31,76 @@ pipeline {
     stage('SAST - Bandit') {
       steps {
         sh '''
+          mkdir -p reports
+          chmod -R a+rwx reports
+
           docker run --rm \
-            -v "$PWD:/src" \
-            -w /src \
+            --volumes-from jenkins \
+            -w "$WORKDIR" \
             python:3.11-slim \
             bash -lc "
-              mkdir -p reports &&
               pip install -q bandit==1.7.9 &&
+              mkdir -p reports &&
               bandit -r . -x $EXCLUDES -f json -o reports/bandit.json || true
             "
+
           chmod -R a+r reports
+          ls -lah reports
           test -s reports/bandit.json
         '''
       }
     }
 
 
+
     stage('Secrets - Gitleaks') {
       steps {
         sh '''
-          # Siempre generamos el archivo, aunque no haya leaks
-          # Si gitleaks devuelve exit code 1 (leaks encontrados), no cortamos: registramos y seguimos.
+          mkdir -p reports
+          chmod -R a+rwx reports
+
           docker run --rm \
-            -v "$PWD:/repo" \
-            -w /repo \
+            --volumes-from jenkins \
+            -w "$WORKDIR" \
             zricethezav/gitleaks:latest detect \
               --source . --no-git \
               --report-format json --report-path reports/gitleaks.json || true
 
-          # Si por alguna razón no se creó, lo dejamos como JSON vacío para no romper imports
-          if [ ! -f reports/gitleaks.json ]; then
-            echo "[]" > reports/gitleaks.json
-          fi
-
+          [ -f reports/gitleaks.json ] || echo "[]" > reports/gitleaks.json
           chmod -R a+r reports
-
-          LEAKS=$(jq 'length' reports/gitleaks.json 2>/dev/null || echo 0)
-          echo "Gitleaks findings: ${LEAKS}"
+          ls -lah reports
         '''
       }
     }
 
+
     stage('SCA - SBOM (CycloneDX)') {
       steps {
         sh '''
+          mkdir -p reports
+          chmod -R a+rwx reports
+
           docker run --rm \
-            -v "$PWD:/src" \
-            -w /src \
+            --volumes-from jenkins \
+            -w "$WORKDIR" \
             python:3.11-slim \
             bash -lc "
-              mkdir -p reports &&
               pip install -q cyclonedx-bom &&
+              mkdir -p reports &&
               if [ -f requirements.txt ]; then
                 cyclonedx-py requirements -i requirements.txt -o reports/bom.xml
               else
                 cyclonedx-py environment -o reports/bom.xml
               fi
             "
+
           chmod -R a+r reports
+          ls -lah reports
           test -s reports/bom.xml
         '''
       }
     }
+
 
     stage('SCA - Dependency-Track (Upload + Metrics)') {
       steps {
