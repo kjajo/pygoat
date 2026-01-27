@@ -44,7 +44,6 @@ pipeline {
               bandit -r . -x $EXCLUDES -f json -o reports/bandit.json || true
             "
 
-          chmod -R a+r reports
           ls -lah reports
           test -s reports/bandit.json
         '''
@@ -67,7 +66,6 @@ pipeline {
               --report-format json --report-path reports/gitleaks.json || true
 
           [ -f reports/gitleaks.json ] || echo "[]" > reports/gitleaks.json
-          chmod -R a+r reports
           ls -lah reports
         '''
       }
@@ -94,7 +92,6 @@ pipeline {
               fi
             "
 
-          chmod -R a+r reports
           ls -lah reports
           test -s reports/bom.xml
         '''
@@ -132,7 +129,6 @@ pipeline {
 
             echo "Dependency-Track project UUID: $PROJECT_UUID"
             echo "$PROJECT_UUID" > reports/dtrack_project_uuid.txt
-            chmod -R a+r reports
 
             # 3) Upload BOM (robust)
             BOM_RESP=$(curl -sS -X POST "$DTRACK_API/bom" \
@@ -145,7 +141,6 @@ pipeline {
             TOKEN=$(echo "$BOM_RESP" | jq -r '.token // empty' 2>/dev/null || true)
             echo "BOM upload token: $TOKEN"
             echo "$TOKEN" > reports/dtrack_bom_token.txt
-            chmod -R a+r reports
 
             # 4) Wait processing (only if token exists)
             if [ -n "$TOKEN" ]; then
@@ -175,7 +170,6 @@ pipeline {
 
             echo "Dependency-Track metrics -> critical=$CRIT high=$HIGH"
             echo "{\"critical\": $CRIT, \"high\": $HIGH}" > reports/dtrack_metrics_summary.json
-            chmod -R a+r reports
 
             # Gate (si querés que falle con HIGH/CRIT, dejalo así)
             if [ "$CRIT" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
@@ -193,7 +187,6 @@ pipeline {
           sh '''
             set -eu
             ENGAGEMENT_ID=${ENGAGEMENT_ID:-1}
-            chmod -R a+r reports
 
             # Bandit
             curl -sS -X POST "$DOJO_API/import-scan/" \
@@ -222,7 +215,6 @@ pipeline {
               -F "active=true" -F "verified=false" \
               -o reports/dojo_import_cyclonedx_response.txt || true
 
-            chmod -R a+r reports
           '''
         }
       }
