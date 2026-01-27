@@ -2,23 +2,28 @@ pipeline {
   agent any
 
   environment {
-    // Internal docker-compose network service names
     DTRACK_API = "http://dtrack-apiserver:8080/api/v1"
     DOJO_API   = "http://dojo:8081/api/v2"
 
-    // Project identity in DTrack/Dojo
     PROJECT_NAME    = "pygoat"
-    PROJECT_VERSION = "local"   // keep "local" if that's what you created in DTrack; or change to "main"
+    PROJECT_VERSION = "local"
 
-    // Bandit exclusions
     EXCLUDES = ".venv,venv,.git,build,dist,node_modules,__pycache__,site-packages"
   }
 
   stages {
 
     stage('Checkout') {
+      steps { checkout scm }
+    }
+
+    stage('Prepare reports dir') {
       steps {
-        checkout scm
+        sh '''
+          rm -rf reports
+          mkdir -p reports
+          chmod -R a+rwx reports
+        '''
       }
     }
 
@@ -32,10 +37,10 @@ pipeline {
             bash -lc "
               mkdir -p reports &&
               pip install -q bandit==1.7.9 &&
-              bandit -r . \
-                -x ./.venv,./venv,./.git,./build,./dist,./node_modules,./__pycache__ \
-                -f json -o reports/bandit.json
+              bandit -r . -x $EXCLUDES -f json -o reports/bandit.json
             "
+          chmod -R a+r reports
+          test -s reports/bandit.json
         '''
       }
     }
@@ -43,31 +48,37 @@ pipeline {
     stage('Secrets - Gitleaks') {
       steps {
         sh '''
-          mkdir -p reports
+          # Siempre generamos el archivo, aunque no haya leaks
+          # Si gitleaks devuelve exit code 1 (leaks encontrados), no cortamos: registramos y seguimos.
           docker run --rm \
             -v "$PWD:/repo" \
             -w /repo \
             zricethezav/gitleaks:latest detect \
               --source . --no-git \
-              --report-format json --report-path reports/gitleaks.json
+              --report-format json --report-path reports/gitleaks.json || true
 
-          # Basic count (will be 0 for "no leaks found")
-          LEAKS=$(jq length reports/gitleaks.json || echo 0)
+          # Si por alguna razón no se creó, lo dejamos como JSON vacío para no romper imports
+          if [ ! -f reports/gitleaks.json ]; then
+            echo "[]" > reports/gitleaks.json
+          fi
+
+          chmod -R a+r reports
+
+          LEAKS=$(jq 'length' reports/gitleaks.json 2>/dev/null || echo 0)
           echo "Gitleaks findings: ${LEAKS}"
         '''
       }
     }
 
-    stage('SCA - Dependency-Track (SBOM + Upload)') {
+    stage('SCA - SBOM (CycloneDX)') {
       steps {
-        withCredentials([string(credentialsId: 'DTRACK_API_KEY', variable: 'DTRACK_KEY')]) {
-          sh '''
-            set -eu
-
-            mkdir -p reports
-
-            # 1) Generate CycloneDX SBOM from requirements.txt (fallback to environment)
-            docker run --rm -v "$PWD:/src" -w /src python:3.11-slim bash -lc "
+        sh '''
+          docker run --rm \
+            -v "$PWD:/src" \
+            -w /src \
+            python:3.11-slim \
+            bash -lc "
+              mkdir -p reports &&
               pip install -q cyclonedx-bom &&
               if [ -f requirements.txt ]; then
                 cyclonedx-py requirements -i requirements.txt -o reports/bom.xml
@@ -75,14 +86,25 @@ pipeline {
                 cyclonedx-py environment -o reports/bom.xml
               fi
             "
+          chmod -R a+r reports
+          test -s reports/bom.xml
+        '''
+      }
+    }
 
-            # 2) Lookup project UUID (robust to non-JSON responses)
+    stage('SCA - Dependency-Track (Upload + Metrics)') {
+      steps {
+        withCredentials([string(credentialsId: 'DTRACK_API_KEY', variable: 'DTRACK_KEY')]) {
+          sh '''
+            set -eu
+
+            # 1) Lookup project (robust)
             LOOKUP_RESP=$(curl -sS -H "X-Api-Key: $DTRACK_KEY" \
               "$DTRACK_API/project/lookup?name=$PROJECT_NAME&version=$PROJECT_VERSION" || true)
 
             PROJECT_UUID=$(echo "$LOOKUP_RESP" | jq -r '.uuid // empty' 2>/dev/null || true)
 
-            # 3) Create project if missing
+            # 2) Create project if missing
             if [ -z "$PROJECT_UUID" ]; then
               CREATE_RESP=$(curl -sS -X PUT "$DTRACK_API/project" \
                 -H "X-Api-Key: $DTRACK_KEY" \
@@ -99,45 +121,57 @@ pipeline {
             fi
 
             echo "Dependency-Track project UUID: $PROJECT_UUID"
+            echo "$PROJECT_UUID" > reports/dtrack_project_uuid.txt
+            chmod -R a+r reports
 
-            # 4) Upload BOM (robust)
+            # 3) Upload BOM (robust)
             BOM_RESP=$(curl -sS -X POST "$DTRACK_API/bom" \
               -H "X-Api-Key: $DTRACK_KEY" \
               -F "project=$PROJECT_UUID" \
               -F "bom=@reports/bom.xml" || true)
 
+            echo "$BOM_RESP" > reports/dtrack_bom_upload_response.txt
+
             TOKEN=$(echo "$BOM_RESP" | jq -r '.token // empty' 2>/dev/null || true)
             echo "BOM upload token: $TOKEN"
+            echo "$TOKEN" > reports/dtrack_bom_token.txt
+            chmod -R a+r reports
 
-            # 5) Optional: wait for processing if token returned
+            # 4) Wait processing (only if token exists)
             if [ -n "$TOKEN" ]; then
-              for i in $(seq 1 30); do
-                TOKEN_RESP=$(curl -sS -H "X-Api-Key: $DTRACK_KEY" "$DTRACK_API/bom/token/$TOKEN" || true)
+              for i in $(seq 1 60); do
+                TOKEN_RESP=$(curl -sS -H "X-Api-Key: $DTRACK_KEY" \
+                  "$DTRACK_API/bom/token/$TOKEN" || true)
+
+                echo "$TOKEN_RESP" > "reports/dtrack_bom_token_status_last.json" || true
+
                 PROCESSING=$(echo "$TOKEN_RESP" | jq -r '.processing // false' 2>/dev/null || echo false)
-                echo "Processing: $PROCESSING (try $i/30)"
+                echo "Processing: $PROCESSING (try $i/60)"
                 [ "$PROCESSING" = "false" ] && break
                 sleep 2
               done
             else
-              echo "No token returned (non-JSON or error). Skipping wait."
+              echo "WARN: No token returned by BOM upload. See reports/dtrack_bom_upload_response.txt"
             fi
 
-            # 6) Security gate: metrics (robust defaults)
+            # 5) Metrics (robust defaults)
             METRICS_RESP=$(curl -sS -H "X-Api-Key: $DTRACK_KEY" \
               "$DTRACK_API/metrics/project/$PROJECT_UUID/current" || true)
+
+            echo "$METRICS_RESP" > reports/dtrack_metrics_current.json || true
 
             CRIT=$(echo "$METRICS_RESP" | jq -r '.critical // 0' 2>/dev/null || echo 0)
             HIGH=$(echo "$METRICS_RESP" | jq -r '.high // 0' 2>/dev/null || echo 0)
 
             echo "Dependency-Track metrics -> critical=$CRIT high=$HIGH"
+            echo "{\"critical\": $CRIT, \"high\": $HIGH}" > reports/dtrack_metrics_summary.json
+            chmod -R a+r reports
 
-            # Gate: fail if any High/Critical
+            # Gate (si querés que falle con HIGH/CRIT, dejalo así)
             if [ "$CRIT" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
-              echo "Security gate FAILED (critical=$CRIT, high=$HIGH)"
+              echo "SECURITY GATE FAILED (Dependency-Track): HIGH/CRITICAL detected."
               exit 1
             fi
-
-            echo "Security gate PASSED"
           '''
         }
       }
@@ -148,9 +182,8 @@ pipeline {
         withCredentials([string(credentialsId: 'DEFECTDOJO_API_KEY', variable: 'DOJO_KEY')]) {
           sh '''
             set -eu
-            mkdir -p reports
-
             ENGAGEMENT_ID=${ENGAGEMENT_ID:-1}
+            chmod -R a+r reports
 
             # Bandit
             curl -sS -X POST "$DOJO_API/import-scan/" \
@@ -158,7 +191,8 @@ pipeline {
               -F "engagement=$ENGAGEMENT_ID" \
               -F "scan_type=Bandit Scan" \
               -F "file=@reports/bandit.json" \
-              -F "active=true" -F "verified=false" || true
+              -F "active=true" -F "verified=false" \
+              -o reports/dojo_import_bandit_response.txt || true
 
             # Gitleaks
             curl -sS -X POST "$DOJO_API/import-scan/" \
@@ -166,7 +200,8 @@ pipeline {
               -F "engagement=$ENGAGEMENT_ID" \
               -F "scan_type=Gitleaks Scan" \
               -F "file=@reports/gitleaks.json" \
-              -F "active=true" -F "verified=false" || true
+              -F "active=true" -F "verified=false" \
+              -o reports/dojo_import_gitleaks_response.txt || true
 
             # CycloneDX
             curl -sS -X POST "$DOJO_API/import-scan/" \
@@ -174,7 +209,10 @@ pipeline {
               -F "engagement=$ENGAGEMENT_ID" \
               -F "scan_type=CycloneDX Scan" \
               -F "file=@reports/bom.xml" \
-              -F "active=true" -F "verified=false" || true
+              -F "active=true" -F "verified=false" \
+              -o reports/dojo_import_cyclonedx_response.txt || true
+
+            chmod -R a+r reports
           '''
         }
       }
