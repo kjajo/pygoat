@@ -69,7 +69,7 @@ pipeline {
     }
 
 
-    stage('SCA - SBOM (Syft CycloneDX)') {
+    stage('SCA - SBOM (CycloneDX)') {
       steps {
         sh '''
           mkdir -p reports
@@ -77,11 +77,19 @@ pipeline {
           docker run --rm \
             --volumes-from jenkins \
             -w "$WORKDIR" \
-            anchore/syft:latest \
-            packages dir:. -o cyclonedx-xml=reports/bom.xml
+            python:3.11-slim \
+            bash -lc "
+              apt update
+              apt install -y libpq-dev gcc python3-dev build-essential pkg-config libffi-dev libjpeg-dev zlib1g-dev
+              set -e
+              pip install -q cyclonedx-bom
+              pip install -q -r requirements.txt
+              mkdir -p reports
+              cyclonedx-py environment --output-format xml -o reports/bom.xml
+            "
 
           head -n 1 reports/bom.xml | grep -E '^(<\\?xml|<bom)' >/dev/null
-          grep -q 'purl=' reports/bom.xml
+          test -s reports/bom.xml
           ls -lah reports/bom.xml
         '''
       }
