@@ -83,13 +83,13 @@ pipeline {
               apt install -y libpq-dev gcc python3-dev build-essential pkg-config libffi-dev libjpeg-dev zlib1g-dev
               set -e
               pip install -q cyclonedx-bom
-              pip install -q -r requirements.txt
               mkdir -p reports
-              cyclonedx-py environment --output-format xml -o reports/bom.xml
+              cyclonedx-py requirements -i requirements.txt --output-format xml -o reports/bom.xml
             "
 
+          # Verificación fuerte: XML + PURL
           head -n 1 reports/bom.xml | grep -E '^(<\\?xml|<bom)' >/dev/null
-          test -s reports/bom.xml
+          grep -q 'purl=' reports/bom.xml
           ls -lah reports/bom.xml
         '''
       }
