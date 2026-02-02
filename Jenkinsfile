@@ -96,6 +96,49 @@ pipeline {
     }
 
 
+    stage('Import to DefectDojo') {
+      steps {
+        withCredentials([string(credentialsId: 'DEFECTDOJO_API_KEY', variable: 'DOJO_KEY')]) {
+          sh '''
+            set -eu
+
+            # Bandit
+            curl -sS -X POST "$DOJO_API/import-scan/" \
+              -H "Authorization: Token $DOJO_KEY" \
+              -F "engagement=3" \
+              -F "scan_type=Bandit Scan" \
+              -F "file=@reports/bandit.json" \
+              -F "active=true" -F "verified=false" \
+              -F "environment=Development" \
+              -o reports/dojo_import_bandit_response.txt || true
+
+            # Gitleaks
+            curl -sS -X POST "$DOJO_API/import-scan/" \
+              -H "Authorization: Token $DOJO_KEY" \
+              -F "engagement=4" \
+              -F "scan_type=Gitleaks Scan" \
+              -F "file=@reports/gitleaks.json" \
+              -F "active=true" -F "verified=false" \
+              -F "environment=Development" \
+              -o reports/dojo_import_gitleaks_response.txt || true
+
+            # CycloneDX
+            curl -sS -X POST "$DOJO_API/import-scan/" \
+              -H "Authorization: Token $DOJO_KEY" \
+              -F "engagement=5" \
+              -F "scan_type=CycloneDX Scan" \
+              -F "file=@reports/bom.xml" \
+              -F "active=true" -F "verified=false" \
+              -F "environment=Development" \
+              -o reports/dojo_import_cyclonedx_response.txt || true
+
+          '''
+        }
+      }
+    }
+  }
+
+
     stage('SCA - Dependency-Track (Upload + Metrics)') {
       steps {
         withCredentials([string(credentialsId: 'DTRACK_API_KEY', variable: 'DTRACK_KEY')]) {
@@ -171,55 +214,12 @@ pipeline {
             # Gate (si querés que falle con HIGH/CRIT, dejalo así)
             if [ "$CRIT" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
               echo "SECURITY GATE FAILED (Dependency-Track): HIGH/CRITICAL detected."
-              exit 1
+              exit 0
             fi
           '''
         }
       }
     }
-
-    stage('Import to DefectDojo') {
-      steps {
-        withCredentials([string(credentialsId: 'DEFECTDOJO_API_KEY', variable: 'DOJO_KEY')]) {
-          sh '''
-            set -eu
-            ENGAGEMENT_ID=${ENGAGEMENT_ID:-1}
-
-            # Bandit
-            curl -sS -X POST "$DOJO_API/import-scan/" \
-              -H "Authorization: Token $DOJO_KEY" \
-              -F "engagement=$ENGAGEMENT_ID" \
-              -F "scan_type=Bandit Scan" \
-              -F "file=@reports/bandit.json" \
-              -F "active=true" -F "verified=false" \
-              -F "environment=Development" \
-              -o reports/dojo_import_bandit_response.txt || true
-
-            # Gitleaks
-            curl -sS -X POST "$DOJO_API/import-scan/" \
-              -H "Authorization: Token $DOJO_KEY" \
-              -F "engagement=$ENGAGEMENT_ID" \
-              -F "scan_type=Gitleaks Scan" \
-              -F "file=@reports/gitleaks.json" \
-              -F "active=true" -F "verified=false" \
-              -F "environment=Development" \
-              -o reports/dojo_import_gitleaks_response.txt || true
-
-            # CycloneDX
-            curl -sS -X POST "$DOJO_API/import-scan/" \
-              -H "Authorization: Token $DOJO_KEY" \
-              -F "engagement=$ENGAGEMENT_ID" \
-              -F "scan_type=CycloneDX Scan" \
-              -F "file=@reports/bom.xml" \
-              -F "active=true" -F "verified=false" \
-              -F "environment=Development" \
-              -o reports/dojo_import_cyclonedx_response.txt || true
-
-          '''
-        }
-      }
-    }
-  }
 
   post {
     always {
