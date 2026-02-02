@@ -136,8 +136,6 @@ pipeline {
         }
       }
     }
-  }
-
 
     stage('SCA - Dependency-Track (Upload + Metrics)') {
       steps {
@@ -220,6 +218,8 @@ pipeline {
         }
       }
     }
+  }
+
 
   post {
     always {
