@@ -34,8 +34,8 @@ def deserialize_data():
         serialized_data = request.form.get('serialized_data', '')
         decoded_data = base64.b64decode(serialized_data)
 
-        # Remediation: avoid pickle deserialization of untrusted data.
-        # Use JSON as a safe serialization format and validate expected structure.
+        # CWE-502 (Deserialización insegura) - Solución: Evitar la deserialización de datos no confiables mediante pickle
+        # Usar JSON como formato de serialización seguro y validar la estructura esperada.
         if isinstance(decoded_data, (bytes, bytearray)):
             decoded_text = decoded_data.decode("utf-8", errors="strict")
         else:
@@ -44,7 +44,7 @@ def deserialize_data():
         user = json.loads(decoded_text)
         if not isinstance(user, dict):
             return "Invalid token format", 400
-        # Optional: strict allow-list of fields
+
         allowed_keys = {"username", "role"}
         if not set(user.keys()).issubset(allowed_keys):
             return "Invalid token content", 400
